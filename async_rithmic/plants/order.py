@@ -136,8 +136,9 @@ class OrderPlant(BasePlant):
 
         order_id = kwargs.get("order_id")
         basket_id = kwargs.get("basket_id")
-        if not order_id and not basket_id:
-            raise InvalidRequestError("Missing argument: order_id or basket_id")
+        exchange_order_id = kwargs.get("exchange_order_id")
+        if not order_id and not basket_id and not exchange_order_id:
+            raise InvalidRequestError("Missing argument: order_id or basket_id or exchange_order_id")
 
         # Check if the user specified an account_id
         account_ids = []
@@ -154,6 +155,8 @@ class OrderPlant(BasePlant):
                 orders = [o for o in orders if o.user_tag == order_id]
             if basket_id:
                 orders = [o for o in orders if o.basket_id == basket_id]
+            if exchange_order_id:
+                orders = [o for o in orders if o.exchange_order_id == exchange_order_id]
 
             if orders:
                 return orders[0]
