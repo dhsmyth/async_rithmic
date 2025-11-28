@@ -312,7 +312,7 @@ class OrderPlant(BasePlant):
             account_id=self._get_account_id(**kwargs)
         )
 
-    async def modify_order(self, **kwargs):
+    async def modify_order(self, skip_list_orders: bool = False, **kwargs):
         """
         Modify an existing order with updated parameters.
 
@@ -325,19 +325,50 @@ class OrderPlant(BasePlant):
         - `target_ticks`: New take-profit in ticks
 
         Note: we can't update SL/TP/main order concurrently or Rithmic will send back an error: 'Atomic order operation in progress'
+        
+        Note: Rithmic does not like excessive list_order() calls. If frequently modifying orders (i.e trailing stops). Consider passing all required arguments instead of listing orders each time and then modifying.
+        
+        I couldn't get the stop_ticks/target_ticks to work. Instead I just order the actual price/trigger_price of the TP/SL orders using their basket_ids
         """
+        for kw in ["account_id", "basket_id", "symbol", "exchange", "order_type"]:
+            if kw not in kwargs:
+                #raise InvalidRequestError(f"Cannot modify order with skip_list_orders=True without passing {kw}")
+                self.logger.warning(f"Cannot modify order with skip_list_orders=True without passing {kw}. Failing over to listing orders and modifying.")
+                skip_list_orders = False
+                break
 
-        order = await self.get_order(**kwargs)
-        if not order:
-            raise Exception(f"Order not found: {kwargs}")
 
-        order_type: OrderType = kwargs.pop("order_type", order.price_type)
-        qty: int = kwargs.pop("qty", order.quantity)
+        if skip_list_orders:
 
-        # Get the current stop ticks and target ticks, we will have to submit the old values when modifying them
-        current_stop_ticks, current_target_ticks = None, None
-        if "stop_ticks" in kwargs or "target_ticks" in kwargs:
-            current_stop_ticks, current_target_ticks = await self.get_stop_and_target(basket_id=order.basket_id, account_id=order.account_id)
+            account_id = kwargs.get("account_id")
+            basket_id = kwargs.get("basket_id")
+            symbol = kwargs.get("symbol")
+            exchange = kwargs.get("exchange")
+            order_type = kwargs.pop("order_type")
+            qty = kwargs.get("qty")
+            price = kwargs.get("price")
+
+
+
+        if not skip_list_orders:
+            order = await self.get_order(**kwargs)
+            if not order:
+                raise Exception(f"Order not found: {kwargs}")
+
+            account_id = order.account_id
+            basket_id = order.basket_id
+            symbol = order.symbol
+            exchange = order.exchange
+
+            qty: int = kwargs.pop("qty", order.quantity)
+
+            order_type: OrderType = kwargs.pop("order_type", order.price_type)
+            price = kwargs.get("price", order.price)
+
+            # Get the current stop ticks and target ticks, we will have to submit the old values when modifying them
+            current_stop_ticks, current_target_ticks = None, None
+            if "stop_ticks" in kwargs or "target_ticks" in kwargs:
+                current_stop_ticks, current_target_ticks = await self.get_stop_and_target(basket_id=order.basket_id, account_id=order.account_id)
 
         # Update the stop
         if "stop_ticks" in kwargs:
@@ -370,19 +401,24 @@ class OrderPlant(BasePlant):
         # Update the actual order
         msg_kwargs = self._validate_price_fields(order_type, raise_exception=False, **kwargs)
 
+
+        #Backwards compatibility and allowing simpler order modifications of price-only without requirement to know qty
+        if qty is not None:
+            msg_kwargs["quantity"] = qty
+
         manual_or_auto = kwargs.get("manual_or_auto", self.client.manual_or_auto)
 
         return await self._send_and_collect(
             template_id=314,
             expected_response=dict(template_id=315),
             manual_or_auto=manual_or_auto,
-            account_id=order.account_id,
-            basket_id=order.basket_id,
-            symbol=order.symbol,
-            exchange=order.exchange,
-            quantity=qty,
+            account_id=account_id,
+            basket_id=basket_id,
+            symbol=symbol,
+            exchange=exchange,
             price_type=order_type,
-            price=msg_kwargs.pop("price", order.price),
+            #I think this is optional. Just let msg_kwargs handle it?
+            #price=msg_kwargs.pop("price", price),
             **msg_kwargs
         )
 
