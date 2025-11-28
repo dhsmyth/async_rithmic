@@ -327,8 +327,6 @@ class OrderPlant(BasePlant):
         Note: we can't update SL/TP/main order concurrently or Rithmic will send back an error: 'Atomic order operation in progress'
         
         Note: Rithmic does not like excessive list_order() calls. If frequently modifying orders (i.e trailing stops). Consider passing all required arguments instead of listing orders each time and then modifying.
-        
-        I couldn't get the stop_ticks/target_ticks to work. Instead I just order the actual price/trigger_price of the TP/SL orders using their basket_ids
         """
         for kw in ["account_id", "basket_id", "symbol", "exchange", "order_type"]:
             if kw not in kwargs:
@@ -345,8 +343,8 @@ class OrderPlant(BasePlant):
             symbol = kwargs.get("symbol")
             exchange = kwargs.get("exchange")
             order_type = kwargs.pop("order_type")
+
             qty = kwargs.get("qty")
-            price = kwargs.get("price")
 
 
 
@@ -359,16 +357,16 @@ class OrderPlant(BasePlant):
             basket_id = order.basket_id
             symbol = order.symbol
             exchange = order.exchange
+            order_type: OrderType = kwargs.pop("order_type", order.price_type)
 
             qty: int = kwargs.pop("qty", order.quantity)
 
-            order_type: OrderType = kwargs.pop("order_type", order.price_type)
-            price = kwargs.get("price", order.price)
 
-            # Get the current stop ticks and target ticks, we will have to submit the old values when modifying them
-            current_stop_ticks, current_target_ticks = None, None
-            if "stop_ticks" in kwargs or "target_ticks" in kwargs:
-                current_stop_ticks, current_target_ticks = await self.get_stop_and_target(basket_id=order.basket_id, account_id=order.account_id)
+        # Get the current stop ticks and target ticks, we will have to submit the old values when modifying them
+        current_stop_ticks, current_target_ticks = None, None
+        if "stop_ticks" in kwargs or "target_ticks" in kwargs:
+            current_stop_ticks, current_target_ticks = await self.get_stop_and_target(basket_id=basket_id, account_id=account_id)
+
 
         # Update the stop
         if "stop_ticks" in kwargs:
@@ -378,8 +376,8 @@ class OrderPlant(BasePlant):
             await self._send_and_collect(
                 template_id=334,
                 expected_response=dict(template_id=335),
-                account_id=order.account_id,
-                basket_id=order.basket_id,
+                account_id=account_id,
+                basket_id=basket_id,
                 level=current_stop_ticks,
                 stop_ticks=kwargs["stop_ticks"],
             )
@@ -392,8 +390,8 @@ class OrderPlant(BasePlant):
             await self._send_and_collect(
                 template_id=332,
                 expected_response=dict(template_id=333),
-                account_id=order.account_id,
-                basket_id=order.basket_id,
+                account_id=account_id,
+                basket_id=basket_id,
                 level=current_target_ticks,
                 target_ticks=kwargs["target_ticks"],
             )
@@ -417,7 +415,7 @@ class OrderPlant(BasePlant):
             symbol=symbol,
             exchange=exchange,
             price_type=order_type,
-            #I think this is optional. Just let msg_kwargs handle it?
+            #I think this is optional. Just let msg_kwargs handle it? NOTE: Orders modify fine without it
             #price=msg_kwargs.pop("price", price),
             **msg_kwargs
         )
